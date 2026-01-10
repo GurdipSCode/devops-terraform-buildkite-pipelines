@@ -1,0 +1,72 @@
+# CodeRabbit configuration for a Buildkite pipeline template repository
+# Focus: YAML quality, security hygiene, and template correctness.
+
+version: 1
+
+reviews:
+  auto_review:
+    enabled: true
+    # Keep noise low, but still enforce correctness on template changes.
+    base_branches:
+      - main
+      - master
+
+  # High-signal guidance for this repo
+  instructions: |
+    This repository stores Buildkite pipeline templates and YAML files.
+
+    When reviewing PRs:
+    - Validate YAML correctness (indentation, list vs map, quoting).
+    - Verify Buildkite schema-ish usage (steps, group, key, depends_on, agents, artifact_paths, env).
+    - Ensure templates remain generic (no org-specific secrets, URLs, tokens, emails, usernames).
+    - Flag any committed secrets or credentials (JSON keys, *.pem, *.key, tokens, vault tokens).
+    - Prefer minimal, composable templates with clear comments.
+    - Keep paths consistent across pipelines (e.g., secrets directory naming).
+    - Encourage cross-platform compatibility when possible; call out Windows/Pwsh specifics explicitly.
+    - Require documentation updates in README for user-facing template changes.
+
+  # File patterns and what to emphasize
+  path_filters:
+    include:
+      - "**/*.yml"
+      - "**/*.yaml"
+      - ".buildkite/**"
+      - "pipelines/**"
+      - "README.md"
+      - "gitbook.yml"
+      - "lefthook.yml"
+      - "mergify.yml"
+      - ".gitignore"
+      - ".coderabbit"
+    exclude:
+      - ".idea/**"
+
+  # Suggest smaller PRs when possible (review quality)
+  limits:
+    max_files_changed: 60
+    max_lines_changed: 2000
+
+  # Ask for checks that matter for this repo
+  checks:
+    security:
+      enabled: true
+      # Treat secrets as a hard stop.
+      fail_on_secrets: true
+    style:
+      enabled: true
+
+  # What CodeRabbit should do in comments
+  comments:
+    # Prefer actionable comments over long essays.
+    mode: "actionable"
+    request_changes_on:
+      - "secrets_detected"
+      - "invalid_yaml"
+
+# Optional: nudge toward consistent YAML style
+conventions:
+  yaml:
+    indent: 2
+    require_document_start_marker: false
+    prefer_double_quotes_for_strings_with_colons: true
+    no_tabs: true

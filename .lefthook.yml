@@ -1,0 +1,22 @@
+pre-commit:
+  parallel: true
+  commands:
+    yaml_parse:
+      glob: "**/*.{yml,yaml}"
+      run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/yaml-validate.ps1 {staged_files}
+
+    buildkite_validate:
+      glob: ".buildkite/**/*.{yml,yaml}"
+      run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/buildkite-validate.ps1 {staged_files}
+
+    secrets:
+      run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/gitleaks.ps1
+
+    prettier:
+      glob: "**/*.{yml,yaml,md,json}"
+      run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/prettier-check.ps1 {staged_files}
+
+pre-push:
+  commands:
+    opa_tests:
+      run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/opa-test.ps1

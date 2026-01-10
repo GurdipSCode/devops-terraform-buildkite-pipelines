@@ -1,0 +1,44 @@
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Buildkite & Pipeline Artifacts
+# These are often generated or downloaded during pipeline execution
+.buildkite/tmp/
+scripts/
+artifacts/
+
+# Secrets & Credentials (CRITICAL)
+# Based on your buildkite.yml, secrets are stored in these paths
+.secrets/
+secrets/
+*.json
+*.pem
+*.key
+
+# Terraform / OpenTofu Temporary Files
+# Even if this repo only stores templates, local testing can create these
+.terraform/
+.opentofu/
+*.tfstate
+*.tfstate.*
+crash.log
+.terraform.lock.hcl
+.terraform.tfvars.json
+
+# Reports and Documentation
+security-reports/
+TERRAFORM.md
+**/README.md
+# (Keep the root README.md)
+!/README.md
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Misc
+.coderabbit/
+node_modules/
