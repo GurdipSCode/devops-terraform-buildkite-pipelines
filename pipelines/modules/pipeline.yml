@@ -1,3 +1,67 @@
+the scripts executed should be part of a repo that is checked out. NOT part of the same repo.
+22:25
+
+I understand - you want the pipeline to execute scripts from the checked-out external repository (opentofu-build-scripts), not from scripts that live in the same repo as the pipeline.
+
+Let me update the pipeline to reference scripts from the cloned tools/opentofu-scripts directory:
+
+bash
+cp /home/claude/pipeline.yml /mnt/user-data/outputs/pipeline.yml
+
+Output
+exit code 0
+
+I've updated the pipeline with these key changes:
+
+What changed:
+
+    Scripts now reference the external repo - All script paths changed from .buildkite/scripts/... to tools/opentofu-scripts/... (the checked-out external repository)
+    Artifact download pattern - Each step that needs scripts now includes:
+
+yaml
+
+   buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+```
+   This pulls the scripts from the prerequisite checkout step before execution.
+
+3. **Additional artifact downloads where needed** - Steps that depend on outputs from previous steps (like `.secrets/**/*`, `next-version.txt`, `CHANGELOG-PREVIEW.md`) also download those artifacts.
+
+**Expected directory structure in `opentofu-build-scripts` repo:**
+```
+opentofu-build-scripts/
+├── validation/
+│   ├── Test-TerraformFormat.ps1
+│   ├── Test-TerraformValidate.ps1
+│   ├── Test-TFLint.ps1
+│   └── Test-ConventionalCommits.ps1
+├── security/
+│   ├── Get-VaultSecrets.ps1
+│   ├── Test-GitGuardian.ps1
+│   ├── Test-Trivy.ps1
+│   └── Test-Checkov.ps1
+├── testing/
+│   ├── Test-Examples.ps1
+│   └── New-ExamplePlan.ps1
+├── documentation/
+│   ├── New-TerraformDocs.ps1
+│   └── Test-DocumentationDrift.ps1
+├── breaking-changes/
+│   └── Test-BreakingChanges.ps1
+├── versioning/
+│   ├── Get-ChangelogPreview.ps1
+│   └── Get-NextVersion.ps1
+├── release/
+│   ├── New-Release.ps1
+│   ├── Publish-Registry.ps1
+│   └── Send-Notification.ps1
+└── manifest.sha256
+
+Pipeline
+YML 
+
+
+Claude is AI and can make mistakes. Please double-check responses.
+Pipeline · YML
 # .buildkite/pipeline.yml
 # Pipeline for Terraform MODULE Repositories
 # This pipeline is for repos that PUBLISH/PROVIDE Terraform modules
@@ -69,48 +133,50 @@ steps:
         agents:
           queue: "windows"
         command: |
-          powershell -ExecutionPolicy Bypass -NoProfile -Command `
-            $ErrorActionPreference = 'Stop'; `
-            $repo = $env:OPENTOFU_SCRIPTS_REPO; `
-            $ref  = $env:OPENTOFU_SCRIPTS_REF; `
-            $dir  = $env:OPENTOFU_SCRIPTS_DIR; `
-            $manifestFile = $env:OPENTOFU_SCRIPTS_MANIFEST_FILE; `
-            $expectedManifest = $env:OPENTOFU_SCRIPTS_EXPECTED_MANIFEST_SHA256; `
-            `
-            if ([string]::IsNullOrWhiteSpace($repo)) { throw 'OPENTOFU_SCRIPTS_REPO is not set' } `
-            if ([string]::IsNullOrWhiteSpace($ref))  { throw 'OPENTOFU_SCRIPTS_REF is not set' } `
-            if ([string]::IsNullOrWhiteSpace($dir))  { throw 'OPENTOFU_SCRIPTS_DIR is not set' } `
-            `
-            if (Test-Path $dir) { Remove-Item -Recurse -Force $dir } `
-            New-Item -ItemType Directory -Force -Path $dir | Out-Null; `
-            `
-            git clone --filter=blob:none --depth 1 $repo $dir; `
-            Push-Location $dir; `
-            git fetch --depth 1 origin $ref; `
-            git checkout --force FETCH_HEAD; `
-            $actualCommit = (git rev-parse HEAD).Trim(); `
-            Pop-Location; `
-            `
-            buildkite-agent annotate (`
-              \"### OpenTofu scripts repo\n\" + `
-              \"- Repo: `$repo`\n\" + `
-              \"- Ref: `$ref`\n\" + `
-              \"- Commit: `$actualCommit`\n\" + `
-              \"- Path: `$dir`\n\" `
-            ) --style info --context opentofu-scripts; `
-            `
-            if (-not [string]::IsNullOrWhiteSpace($expectedManifest)) { `
-              $mf = Join-Path $dir $manifestFile; `
-              if (-not (Test-Path $mf)) { throw \"Manifest file not found: $manifestFile\" } `
-              $actual = (Get-FileHash -Algorithm SHA256 $mf).Hash.ToLower(); `
-              $expected = $expectedManifest.Trim().ToLower(); `
-              if ($actual -ne $expected) { `
-                throw (\"Manifest SHA256 mismatch. Expected $expected, got $actual\") `
-              } `
-              buildkite-agent annotate (\"Manifest verified: `$manifestFile (sha256 $actual)\") --style success --context opentofu-scripts-manifest; `
-            } `
-            `
-            Write-Host \"Checked out scripts commit: $actualCommit\";
+          powershell -ExecutionPolicy Bypass -NoProfile -Command @'
+            $ErrorActionPreference = 'Stop'
+            
+            $repo = $env:OPENTOFU_SCRIPTS_REPO
+            $ref  = $env:OPENTOFU_SCRIPTS_REF
+            $dir  = $env:OPENTOFU_SCRIPTS_DIR
+            $manifestFile = $env:OPENTOFU_SCRIPTS_MANIFEST_FILE
+            $expectedManifest = $env:OPENTOFU_SCRIPTS_EXPECTED_MANIFEST_SHA256
+            
+            if ([string]::IsNullOrWhiteSpace($repo)) { throw 'OPENTOFU_SCRIPTS_REPO is not set' }
+            if ([string]::IsNullOrWhiteSpace($ref))  { throw 'OPENTOFU_SCRIPTS_REF is not set' }
+            if ([string]::IsNullOrWhiteSpace($dir))  { throw 'OPENTOFU_SCRIPTS_DIR is not set' }
+            
+            if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            
+            git clone --filter=blob:none --depth 1 $repo $dir
+            Push-Location $dir
+            git fetch --depth 1 origin $ref
+            git checkout --force FETCH_HEAD
+            $actualCommit = (git rev-parse HEAD).Trim()
+            Pop-Location
+            
+            buildkite-agent annotate @"
+            ### OpenTofu scripts repo
+            - Repo: ``$repo``
+            - Ref: ``$ref``
+            - Commit: ``$actualCommit``
+            - Path: ``$dir``
+          "@ --style info --context opentofu-scripts
+            
+            if (-not [string]::IsNullOrWhiteSpace($expectedManifest)) {
+              $mf = Join-Path $dir $manifestFile
+              if (-not (Test-Path $mf)) { throw "Manifest file not found: $manifestFile" }
+              $actual = (Get-FileHash -Algorithm SHA256 $mf).Hash.ToLower()
+              $expected = $expectedManifest.Trim().ToLower()
+              if ($actual -ne $expected) {
+                throw "Manifest SHA256 mismatch. Expected $expected, got $actual"
+              }
+              buildkite-agent annotate "Manifest verified: ``$manifestFile`` (sha256 $actual)" --style success --context opentofu-scripts-manifest
+            }
+            
+            Write-Host "Checked out scripts commit: $actualCommit"
+          '@
         artifact_paths:
           - "tools/opentofu-scripts/**/*.ps1"
           - "tools/opentofu-scripts/**/*.psm1"
@@ -131,26 +197,34 @@ steps:
 
       - label: ":terraform: Format Check"
         key: "terraform-fmt"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/validation/Test-TerraformFormat.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/validation/Test-TerraformFormat.ps1
         agents:
           queue: "windows"
 
       - label: ":terraform: Validate Module"
         key: "terraform-validate"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/validation/Test-TerraformValidate.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/validation/Test-TerraformValidate.ps1
         agents:
           queue: "windows"
 
       - label: ":lint: TFLint"
         key: "tflint"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/validation/Test-TFLint.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/validation/Test-TFLint.ps1
         agents:
           queue: "windows"
         soft_fail: true
 
       - label: ":conventional_commits: Validate Commits"
         key: "validate-commits"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/validation/Test-ConventionalCommits.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/validation/Test-ConventionalCommits.ps1
         agents:
           queue: "windows"
         soft_fail: true
@@ -166,7 +240,9 @@ steps:
 
       - label: ":vault: Fetch Security Credentials"
         key: "fetch-security-creds"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/security/Get-VaultSecrets.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/security/Get-VaultSecrets.ps1
         artifact_paths:
           - ".secrets/**/*"
         agents:
@@ -175,13 +251,18 @@ steps:
       - label: ":gitguardian: Secret Scan"
         key: "gitguardian-scan"
         depends_on: "fetch-security-creds"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/security/Test-GitGuardian.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          buildkite-agent artifact download ".secrets/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/security/Test-GitGuardian.ps1
         agents:
           queue: "windows"
 
       - label: ":shield: Trivy Security Scan"
         key: "trivy-scan"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/security/Test-Trivy.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/security/Test-Trivy.ps1
         artifact_paths:
           - "trivy-report.json"
         agents:
@@ -189,7 +270,9 @@ steps:
 
       - label: ":checkov: Checkov Scan"
         key: "checkov-scan"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/security/Test-Checkov.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/security/Test-Checkov.ps1
         agents:
           queue: "windows"
         soft_fail: true
@@ -204,14 +287,18 @@ steps:
 
       - label: ":terraform: Validate Examples"
         key: "validate-examples"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/testing/Test-Examples.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/testing/Test-Examples.ps1
         agents:
           queue: "windows"
 
       - label: ":terraform: Plan Examples"
         key: "plan-examples"
         depends_on: "validate-examples"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/testing/New-ExamplePlan.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/testing/New-ExamplePlan.ps1
         agents:
           queue: "windows"
         soft_fail: true
@@ -227,7 +314,9 @@ steps:
 
       - label: ":books: Generate terraform-docs"
         key: "terraform-docs"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/documentation/New-TerraformDocs.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/documentation/New-TerraformDocs.ps1
         artifact_paths:
           - "README.md"
           - "modules/*/README.md"
@@ -241,32 +330,34 @@ steps:
         agents:
           queue: "windows"
         command: |
-          powershell -ExecutionPolicy Bypass -NoProfile -Command `
-            $ErrorActionPreference = 'Continue'; `
-            `
-            if (-not (Get-Command terraform-docs -ErrorAction SilentlyContinue)) { `
-              Write-Error \"terraform-docs is not installed on this agent\"; `
-              exit 1 `
-            } `
-            `
-            Write-Host \"Running terraform-docs in diff mode\"; `
-            terraform-docs markdown table . | Out-File terraform-docs.generated.md -Encoding utf8; `
-            `
-            if (-not (Test-Path README.md)) { `
-              Write-Warning \"README.md does not exist\"; `
-              Get-Content terraform-docs.generated.md; `
-              exit 1 `
-            } `
-            `
-            git diff --no-index -- README.md terraform-docs.generated.md | Tee-Object terraform-docs.diff; `
-            `
-            if ((Get-Item terraform-docs.diff).Length -gt 0) { `
-              Write-Host \"terraform-docs output differs from README.md:\"; `
-              Get-Content terraform-docs.diff; `
-              exit 1 `
-            } `
-            `
-            Write-Host \"README.md is up to date with terraform-docs output\"; `
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -NoProfile -Command @'
+            $ErrorActionPreference = 'Continue'
+            
+            if (-not (Get-Command terraform-docs -ErrorAction SilentlyContinue)) {
+              Write-Error "terraform-docs is not installed on this agent"
+              exit 1
+            }
+            
+            Write-Host "Running terraform-docs in diff mode"
+            terraform-docs markdown table . | Out-File terraform-docs.generated.md -Encoding utf8
+            
+            if (-not (Test-Path README.md)) {
+              Write-Warning "README.md does not exist"
+              Get-Content terraform-docs.generated.md
+              exit 1
+            }
+            
+            git diff --no-index -- README.md terraform-docs.generated.md | Tee-Object terraform-docs.diff
+            
+            if ((Get-Item terraform-docs.diff).Length -gt 0) {
+              Write-Host "terraform-docs output differs from README.md:"
+              Get-Content terraform-docs.diff
+              exit 1
+            }
+            
+            Write-Host "README.md is up to date with terraform-docs output"
+          '@
         artifact_paths:
           - "terraform-docs.generated.md"
           - "terraform-docs.diff"
@@ -274,7 +365,9 @@ steps:
       - label: ":mag: Check Documentation Drift"
         key: "docs-drift"
         depends_on: "terraform-docs"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/documentation/Test-DocumentationDrift.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/documentation/Test-DocumentationDrift.ps1
         agents:
           queue: "windows"
         soft_fail: true
@@ -290,7 +383,9 @@ steps:
 
       - label: ":warning: Detect Breaking Changes"
         key: "breaking-changes"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/breaking-changes/Test-BreakingChanges.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/breaking-changes/Test-BreakingChanges.ps1
         artifact_paths:
           - "version-bump-type.txt"
         agents:
@@ -306,7 +401,9 @@ steps:
 
       - label: ":cliff: Generate Changelog Preview"
         key: "changelog-preview"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/versioning/Get-ChangelogPreview.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/versioning/Get-ChangelogPreview.ps1
         artifact_paths:
           - "CHANGELOG-PREVIEW.md"
         agents:
@@ -314,7 +411,9 @@ steps:
 
       - label: ":calculator: Calculate Next Version"
         key: "calculate-version"
-        command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/versioning/Get-NextVersion.ps1"
+        command: |
+          buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+          powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/versioning/Get-NextVersion.ps1
         artifact_paths:
           - "next-version.txt"
           - "version-type.txt"
@@ -336,7 +435,11 @@ steps:
       - "versioning-phase"
       - "approve-release"
     allow_dependency_failure: true
-    command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/release/New-Release.ps1"
+    command: |
+      buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+      buildkite-agent artifact download "next-version.txt" .
+      buildkite-agent artifact download "CHANGELOG-PREVIEW.md" .
+      powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/release/New-Release.ps1
     agents:
       queue: "windows"
 
@@ -346,7 +449,9 @@ steps:
   - label: ":package: Publish to Registry"
     key: "publish-registry"
     depends_on: "create-release"
-    command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/release/Publish-Registry.ps1"
+    command: |
+      buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+      powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/release/Publish-Registry.ps1
     agents:
       queue: "windows"
 
@@ -357,6 +462,9 @@ steps:
     key: "notify-release"
     depends_on: "publish-registry"
     allow_dependency_failure: true
-    command: "powershell -ExecutionPolicy Bypass -File .buildkite/scripts/release/Send-Notification.ps1"
+    command: |
+      buildkite-agent artifact download "tools/opentofu-scripts/**/*" .
+      powershell -ExecutionPolicy Bypass -File tools/opentofu-scripts/release/Send-Notification.ps1
     agents:
       queue: "windows"
+
